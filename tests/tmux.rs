@@ -305,6 +305,16 @@ impl World {
     }
 }
 
+/// The folder tmux is installed in. Homebrew keeps it outside /usr/bin.
+fn tmux_dir() -> PathBuf {
+    let out = Command::new("sh")
+        .args(["-c", "command -v tmux"])
+        .output()
+        .unwrap();
+    let path = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+    path.parent().unwrap().to_path_buf()
+}
+
 fn den_world(name: &str, slow_git: bool) -> Option<World> {
     if !have_tmux() {
         return None;
@@ -338,12 +348,13 @@ fn den_world(name: &str, slow_git: bool) -> Option<World> {
     write_script(
         &wrapper,
         &format!(
-            "export HOME={} XDG_CACHE_HOME={} XDG_CONFIG_HOME={} DEN_SOCKET={} SHELL=/bin/sh PATH={}:/usr/bin:/bin\nexec {} \"$@\"",
+            "export HOME={} XDG_CACHE_HOME={} XDG_CONFIG_HOME={} DEN_SOCKET={} SHELL=/bin/sh PATH={}:{}:/usr/bin:/bin\nexec {} \"$@\"",
             q(root.join("home")),
             q(root.join("cache")),
             q(root.join("config")),
             socket,
             q(bin),
+            q(tmux_dir()),
             q(PathBuf::from(env!("CARGO_BIN_EXE_den"))),
         ),
     );
