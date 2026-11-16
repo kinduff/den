@@ -6,6 +6,8 @@ Claude sessions, and opens each one as a tab in its own tmux server.
 No more `cd` into a folder, `claude --resume`, find out the session lives in the
 parent folder, `cd ..`, try again. Run `den` from anywhere and pick.
 
+![den picking a session, opening it in a tab, and splitting the tab](docs/demo/den.gif)
+
 ## What it shows
 
 - Every folder you have used with Claude, plus the other folders under your
