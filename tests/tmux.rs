@@ -18,6 +18,14 @@ struct Server {
     tmp: tempfile::TempDir,
 }
 
+impl Server {
+    /// The temp folder with symlinks resolved: tmux reports resolved paths,
+    /// and on macOS the temp folder sits behind the `/var` symlink.
+    fn root(&self) -> PathBuf {
+        self.tmp.path().canonicalize().unwrap()
+    }
+}
+
 impl Drop for Server {
     fn drop(&mut self) {
         let socket = self.tmux.run(&["display", "-p", "#{socket_path}"]);
@@ -66,7 +74,7 @@ fn write_script(path: &Path, body: &str) {
 /// PATH of the client that asked for it (here the test process), so the
 /// server's environment cannot carry it.
 fn fake_claude(server: &Server, body: &str) -> String {
-    let bin = server.tmp.path().join("bin");
+    let bin = server.root().join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     write_script(&bin.join("claude"), body);
     let shell = bin.join("sh");
@@ -94,7 +102,7 @@ fn poll<T: std::fmt::Debug>(mut query: impl FnMut() -> T, want: impl Fn(&T) -> b
 }
 
 fn project_dir(server: &Server) -> PathBuf {
-    let dir = server.tmp.path().join("my proj@x é");
+    let dir = server.root().join("my proj@x é");
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -225,7 +233,7 @@ fn split_starts_in_the_project_folder() {
 #[test]
 fn resume_is_tagged_and_not_opened_twice() {
     let Some(s) = server("resume") else { return };
-    let marker = s.tmp.path().join("fake-claude-ran");
+    let marker = s.root().join("fake-claude-ran");
     let body = format!("touch '{}'\nsleep 30", marker.display());
     let shell = fake_claude(&s, &body);
     let req = OpenReq {
@@ -286,7 +294,7 @@ struct World {
 
 impl World {
     fn path(&self, rel: &str) -> PathBuf {
-        self.server.tmp.path().join(rel)
+        self.server.root().join(rel)
     }
 
     fn window_zero(&self) -> String {
@@ -303,7 +311,7 @@ fn den_world(name: &str, slow_git: bool) -> Option<World> {
     }
     let n = COUNTER.fetch_add(1, Ordering::SeqCst);
     let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path().to_path_buf();
+    let root = tmp.path().canonicalize().unwrap();
     let socket = format!("den-test-{}-{n}-{name}", std::process::id());
     let proj = root.join("work/proj");
     std::fs::create_dir_all(&proj).unwrap();
@@ -421,7 +429,7 @@ fn slow_git_does_not_block_the_list() {
 fn open_refuses_a_missing_folder() {
     let Some(s) = server("missing") else { return };
     let req = OpenReq {
-        dir: s.tmp.path().join("deleted"),
+        dir: s.root().join("deleted"),
         name: "gone".into(),
         what: What::Shell,
     };
@@ -451,7 +459,7 @@ fn panes(tmux: &Tmux, window: &str) -> usize {
 
 /// Runs a bound command as if pressed in the current window.
 fn press(s: &Server, key: &str) {
-    let file = s.tmp.path().join("press.conf");
+    let file = s.root().join("press.conf");
     std::fs::write(&file, bound_command(&s.tmux, key)).unwrap();
     s.tmux
         .run(&["source-file", &file.to_string_lossy()])
@@ -498,7 +506,7 @@ fn odd_folder_names_open_in_the_folder() {
     let Some(s) = server("odd-dirs") else { return };
     let names = ["a b", "it's", "x#y", "x#[fg=red]y", "cost $HOME", "semi;"];
     for (k, name) in names.iter().enumerate() {
-        let dir = s.tmp.path().join(name);
+        let dir = s.root().join(name);
         std::fs::create_dir_all(&dir).unwrap();
         let req = OpenReq {
             dir: dir.clone(),
