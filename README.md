@@ -27,8 +27,14 @@ Sessions started by scripts and agents are hidden until you press `a`.
 Needs Linux or macOS, tmux 3.2 or newer, and `claude` on your `PATH`.
 
 ```sh
-cargo install --path .
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kinduff/den/releases/latest/download/den-installer.sh | sh
 den
+```
+
+That puts a prebuilt `den` in `~/.local/bin`. Or build it yourself:
+
+```sh
+cargo install --git https://github.com/kinduff/den
 ```
 
 ## Home tab
@@ -92,3 +98,7 @@ hide = []           # folders to leave out
 
 den writes only `~/.config/den/` and `~/.cache/den/`. It reads
 `~/.claude/projects` and never writes there.
+
+## License
+
+MIT

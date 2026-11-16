@@ -2,6 +2,11 @@
 name = "den"
 version = "0.1.0"
 edition = "2024"
+description = "A project and session picker for Claude Code"
+repository = "https://github.com/kinduff/den"
+homepage = "https://github.com/kinduff/den"
+readme = "README.md"
+license = "MIT"
 
 [dependencies]
 anyhow = "1.0.104"
@@ -16,3 +21,8 @@ toml = "1.2.1"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
