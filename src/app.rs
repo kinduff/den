@@ -72,6 +72,9 @@ pub struct App {
     pub home: PathBuf,
     /// The tree was built without git: repo facts are not known yet.
     pub provisional: bool,
+    /// A key has been pressed. Until then new data leaves the cursor on the
+    /// top row instead of following whatever row was first in older data.
+    pub touched: bool,
 }
 
 impl App {
@@ -94,6 +97,7 @@ impl App {
             now,
             home: PathBuf::new(),
             provisional: false,
+            touched: false,
         }
     }
 
@@ -103,7 +107,12 @@ impl App {
         let place = self.place();
         self.tree = tree;
         self.sessions = sessions;
-        self.restore(place);
+        if self.touched {
+            self.restore(place);
+        } else {
+            self.project_cursor = 0;
+            self.session_cursor = 0;
+        }
     }
 
     pub fn rows(&self) -> Vec<Row> {
@@ -148,6 +157,7 @@ impl App {
         if key.kind != KeyEventKind::Press {
             return Action::None;
         }
+        self.touched = true;
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             return Action::Detach;
         }
@@ -673,6 +683,7 @@ pub mod fixture {
 
     /// Moves the project cursor onto the row for `path`.
     pub fn select(app: &mut App, path: &str) {
+        app.touched = true;
         app.project_cursor = app
             .rows()
             .iter()
@@ -1047,6 +1058,34 @@ mod tests {
     fn selected_session(app: &App) -> String {
         let rows = app.session_rows();
         app.sessions[rows[app.session_cursor].idx].id.clone()
+    }
+
+    #[test]
+    fn new_data_before_any_key_leaves_the_cursor_on_the_top_row() {
+        let (mut app, probe) = app();
+        let top = names(&app)[0].clone();
+        // Older data put another project first; the cursor sat on row 0.
+        let mut sessions = sessions();
+        sessions.push(session("fresh", "/w/kpis", 1, true, "Just now"));
+        let tree = fixture_tree(&sessions, &probe);
+        app.set_data(tree, sessions);
+        assert_ne!(names(&app)[0], top, "the order changed");
+        assert_eq!(app.project_cursor, 0);
+
+        // After a key, the selected project is followed instead.
+        app.on_key(ch('j'), &probe);
+        let picked = app.selected_path().unwrap();
+        let mut sessions = sessions_with("fresh2", "/w/lab");
+        sessions.push(session("fresh", "/w/kpis", 1, true, "Just now"));
+        let tree = fixture_tree(&sessions, &probe);
+        app.set_data(tree, sessions);
+        assert_eq!(app.selected_path().unwrap(), picked);
+    }
+
+    fn sessions_with(id: &str, cwd: &str) -> Vec<SessionMeta> {
+        let mut all = sessions();
+        all.push(session(id, cwd, 0, true, "Newest"));
+        all
     }
 
     #[test]
