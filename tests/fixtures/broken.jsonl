@@ -1,0 +1,5 @@
+{"parentUuid":null,"type":"user","entrypoint":"cli","cwd":"/w","sessionId":"s1","gitBranch":"main","timestamp":"2026-11-08T10:00:00.000Z","version":"2.1.319"}
+this is garbage
+{"cwd":"/badÿþ","type":"user"}
+{"parentUuid":null,"type":"user","entrypoint":"cli","cwd":"/w","sessionId":"s1","gitBranch":"main","timestamp":"2026-11-08T10:05:00.000Z","version":"2.1.319"}
+{"cwd":"/half

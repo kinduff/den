@@ -1,0 +1,5 @@
+{"parentUuid":null,"type":"user","entrypoint":"cli","cwd":"/w","sessionId":"s1","gitBranch":"main","timestamp":"2026-11-08T10:00:00.000Z","version":"2.1.319"}
+{"parentUuid":null,"type":"user","entrypoint":"cli","cwd":"/w/inventory","sessionId":"s1","gitBranch":"main","timestamp":"2026-11-08T10:01:00.000Z","version":"2.1.319"}
+{"parentUuid":null,"type":"user","entrypoint":"cli","cwd":"/w/lab/x","sessionId":"s1","gitBranch":"main","timestamp":"2026-11-08T10:02:00.000Z","version":"2.1.319"}
+{"parentUuid":null,"type":"user","entrypoint":"cli","cwd":"/w","sessionId":"s1","gitBranch":"main","timestamp":"2026-11-08T10:03:00.000Z","version":"2.1.319"}
+{"parentUuid":null,"type":"user","entrypoint":"cli","cwd":"/w/inventory","sessionId":"s1","gitBranch":"main","timestamp":"2026-11-08T10:04:00.000Z","version":"2.1.319"}
