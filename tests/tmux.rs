@@ -6,7 +6,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use den::tmux::{OpenReq, Tmux, What};
+use den::tmux::{OpenReq, Tab, Tmux, What};
 
 const SHELL: &str = "/bin/sh";
 
@@ -247,6 +247,39 @@ fn resume_is_tagged_and_not_opened_twice() {
     assert!(s.tmux.window_of_session("abc").is_some());
     // The fake ran, not a real claude.
     poll(|| marker.exists(), |ran| *ran);
+}
+
+#[test]
+fn tabs_report_their_number_folder_and_session() {
+    let Some(s) = server("tabs") else { return };
+    let shell = fake_claude(&s, "sleep 30");
+    let dir = project_dir(&s);
+    let open = |name: &str, what: What| {
+        let req = OpenReq {
+            dir: dir.clone(),
+            name: name.into(),
+            what,
+        };
+        s.tmux.open(&req, &shell).unwrap();
+    };
+    open("shell", What::Shell);
+    open("proj", What::Resume("abc".into()));
+    let (tabs, _) = s.tmux.poll_tabs();
+    assert_eq!(
+        tabs,
+        vec![
+            Tab {
+                index: 1,
+                dir: dir.clone(),
+                sessions: Vec::new(),
+            },
+            Tab {
+                index: 2,
+                dir: dir.clone(),
+                sessions: vec!["abc".into()],
+            },
+        ]
+    );
 }
 
 #[test]

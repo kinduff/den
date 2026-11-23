@@ -25,7 +25,7 @@ use crate::index::{self, Index};
 use crate::project::{Kind, MemoProbe, Probe, Project, RealProbe, Tree, build_tree};
 use crate::scan::scan;
 use crate::session::SessionMeta;
-use crate::tmux::Tmux;
+use crate::tmux::{Tab, Tmux};
 
 const REFRESH_EVERY: Duration = Duration::from_secs(30);
 const GIT_FRESH_FOR: Duration = Duration::from_secs(60);
@@ -52,7 +52,7 @@ enum Msg {
     },
     Git(PathBuf, Option<GitStatus>),
     Modified(PathBuf, i64),
-    OpenDirs(Vec<PathBuf>),
+    Tabs(Vec<Tab>),
     /// Whether window 0 is the active window with a client attached.
     HomeActive(bool),
     Notice(String),
@@ -157,7 +157,7 @@ fn run() -> anyhow::Result<()> {
         let active = Arc::clone(&home_active);
         thread::spawn(move || indexer(tx, paths, &active, &indexer_woken));
     }
-    let wake = spawn_open_dirs(tx.clone(), tmux.clone(), home_active, wake_indexer);
+    let wake = spawn_tabs(tx.clone(), tmux.clone(), home_active, wake_indexer);
     let pool = GitPool::start(tx);
 
     loop {
@@ -284,7 +284,7 @@ impl Ui {
             Msg::Modified(path, t) => {
                 self.app.modified.insert(path, t);
             }
-            Msg::OpenDirs(dirs) => self.app.open_dirs = dirs,
+            Msg::Tabs(tabs) => self.app.tabs = tabs,
             Msg::HomeActive(active) => {
                 if active && !self.home_active {
                     // Back on the home tab: ask again at once.
@@ -368,7 +368,7 @@ fn spawn_input(tx: Sender<Msg>) {
 /// Lists the open tabs and whether the home tab is watched every
 /// `OPEN_DIRS_EVERY`, or at once when woken. Keeps `home_active` up to date
 /// and wakes the indexer when the home tab is watched again.
-fn spawn_open_dirs(
+fn spawn_tabs(
     tx: Sender<Msg>,
     tmux: Tmux,
     home_active: Arc<AtomicBool>,
@@ -377,8 +377,8 @@ fn spawn_open_dirs(
     let (wake, woken) = mpsc::channel::<()>();
     thread::spawn(move || {
         loop {
-            let (dirs, active) = tmux.poll_tabs();
-            if tx.send(Msg::OpenDirs(dirs)).is_err() || tx.send(Msg::HomeActive(active)).is_err() {
+            let (tabs, active) = tmux.poll_tabs();
+            if tx.send(Msg::Tabs(tabs)).is_err() || tx.send(Msg::HomeActive(active)).is_err() {
                 return;
             }
             if active && !home_active.swap(active, Ordering::SeqCst) {

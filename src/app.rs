@@ -13,7 +13,7 @@ use crate::config::contract_tilde;
 use crate::git::GitStatus;
 use crate::project::{Probe, Project, SessionRef, Tree, claude_worktree_repo};
 use crate::session::SessionMeta;
-use crate::tmux::{OpenReq, What};
+use crate::tmux::{OpenReq, Tab, What};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Focus {
@@ -56,7 +56,8 @@ pub struct App {
     pub sessions: Vec<SessionMeta>,
     pub status: HashMap<PathBuf, GitStatus>,
     pub modified: HashMap<PathBuf, i64>,
-    pub open_dirs: Vec<PathBuf>,
+    /// The tabs open right now, window 0 left out.
+    pub tabs: Vec<Tab>,
     pub expanded: HashSet<PathBuf>,
     pub focus: Focus,
     pub sort: Sort,
@@ -84,7 +85,7 @@ impl App {
             sessions: Vec::new(),
             status: HashMap::new(),
             modified: HashMap::new(),
-            open_dirs: Vec::new(),
+            tabs: Vec::new(),
             expanded: HashSet::new(),
             focus: Focus::Projects,
             sort: Sort::Activity,

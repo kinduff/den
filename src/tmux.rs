@@ -25,6 +25,15 @@ pub struct OpenReq {
     pub what: What,
 }
 
+/// A tab den opened: its number, its project folder and the sessions its
+/// panes are resuming.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Tab {
+    pub index: u32,
+    pub dir: PathBuf,
+    pub sessions: Vec<String>,
+}
+
 /// A handle on one private tmux server.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tmux {
@@ -38,7 +47,7 @@ const NEW_CLAUDE: &str = "{new_claude}";
 /// Prefix-free key bindings: (key as written in the tmux config, command).
 /// Splits and new panes do nothing in window 0, where `M-w` cannot close
 /// them.
-const KEYS: &[(&str, &str)] = &[
+pub(crate) const KEYS: &[(&str, &str)] = &[
     ("M-0", "select-window -t :0"),
     ("M-1", "select-window -t :1"),
     ("M-2", "select-window -t :2"),
@@ -225,19 +234,20 @@ impl Tmux {
 
     /// The project folder of every tab but window 0.
     pub fn open_dirs(&self) -> Vec<PathBuf> {
-        self.poll_tabs().0
+        self.poll_tabs().0.into_iter().map(|t| t.dir).collect()
     }
 
-    /// The project folder of every tab but window 0, and whether window 0
-    /// is the active window with a client attached. When tmux cannot be
-    /// asked, the home tab counts as watched.
-    pub fn poll_tabs(&self) -> (Vec<PathBuf>, bool) {
+    /// Every tab but window 0, and whether window 0 is the active window
+    /// with a client attached. When tmux cannot be asked, the home tab
+    /// counts as watched.
+    pub fn poll_tabs(&self) -> (Vec<Tab>, bool) {
         match self.run(&[
-            "list-windows",
+            "list-panes",
+            "-s",
             "-t",
             SESSION,
             "-F",
-            "#{window_index}\t#{window_active}\t#{session_attached}\t#{@den_dir}",
+            "#{window_index}\t#{window_active}\t#{session_attached}\t#{@den_session}\t#{@den_dir}",
         ]) {
             Ok(out) => parse_tabs(&out),
             Err(_) => (Vec::new(), true),
@@ -262,24 +272,42 @@ fn socket_name(den_socket: Option<String>) -> String {
         .unwrap_or_else(|| SESSION.to_string())
 }
 
-/// `poll_tabs` from `list-windows` lines `index\tactive\tattached\tdir`.
-fn parse_tabs(out: &str) -> (Vec<PathBuf>, bool) {
-    let mut dirs = Vec::new();
+/// `poll_tabs` from `list-panes` lines `index\tactive\tattached\tsession\tdir`,
+/// one per pane. A window den did not open has no folder and is left out.
+fn parse_tabs(out: &str) -> (Vec<Tab>, bool) {
+    let mut tabs: Vec<Tab> = Vec::new();
     let mut home_active = false;
     for line in out.lines() {
-        let mut f = line.splitn(4, '\t');
-        let (Some(index), Some(active), Some(attached), dir) =
-            (f.next(), f.next(), f.next(), f.next())
+        let mut f = line.splitn(5, '\t');
+        let (Some(index), Some(active), Some(attached), Some(session), Some(dir)) =
+            (f.next(), f.next(), f.next(), f.next(), f.next())
         else {
             continue;
         };
-        if index == "0" {
+        let Ok(index) = index.parse::<u32>() else {
+            continue;
+        };
+        if index == 0 {
             home_active = active == "1" && attached != "0";
-        } else if let Some(dir) = dir.filter(|d| !d.is_empty()) {
-            dirs.push(PathBuf::from(dir));
+            continue;
+        }
+        if dir.is_empty() {
+            continue;
+        }
+        if tabs.last().is_none_or(|t| t.index != index) {
+            tabs.push(Tab {
+                index,
+                dir: PathBuf::from(dir),
+                sessions: Vec::new(),
+            });
+        }
+        if !session.is_empty()
+            && let Some(tab) = tabs.last_mut()
+        {
+            tab.sessions.push(session.to_string());
         }
     }
-    (dirs, home_active)
+    (tabs, home_active)
 }
 
 /// (major, minor) from `tmux -V` output: "tmux 3.8", "tmux 3.2a",
@@ -492,19 +520,28 @@ mod tests {
     }
 
     #[test]
-    fn tabs_parse_dirs_and_whether_home_is_watched() {
-        let out = "0\t1\t1\t\n1\t0\t1\t/w/a b\n2\t0\t1\t\n";
-        assert_eq!(parse_tabs(out), (vec![PathBuf::from("/w/a b")], true));
-        assert!(
-            !parse_tabs(
-                "0	0	1	
-1	1	1	/w
-"
+    fn tabs_parse_number_folder_sessions_and_whether_home_is_watched() {
+        // One line per pane: tab 1 has two panes, one resuming `abc`; tab 2
+        // was not opened by den; tab 4 resumes `def`.
+        let out = "0\t1\t1\t\t\n\
+                   1\t0\t1\tabc\t/w/a b\n\
+                   1\t0\t1\t\t/w/a b\n\
+                   2\t0\t1\t\t\n\
+                   4\t0\t1\tdef\t/w/c\n";
+        let tab = |index, dir: &str, sessions: &[&str]| Tab {
+            index,
+            dir: dir.into(),
+            sessions: sessions.iter().map(|s| s.to_string()).collect(),
+        };
+        assert_eq!(
+            parse_tabs(out),
+            (
+                vec![tab(1, "/w/a b", &["abc"]), tab(4, "/w/c", &["def"])],
+                true
             )
-            .1,
-            "another tab"
         );
-        assert!(!parse_tabs("0\t1\t0\t\n").1, "detached");
+        assert!(!parse_tabs("0\t0\t1\t\t\n1\t1\t1\t\t/w\n").1, "another tab");
+        assert!(!parse_tabs("0\t1\t0\t\t\n").1, "detached");
     }
 
     #[test]

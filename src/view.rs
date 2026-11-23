@@ -174,7 +174,7 @@ fn draw_projects(f: &mut Frame, app: &App, cols: &Columns, area: Rect) {
 
 fn project_line(app: &App, cols: &Columns, i: usize, depth: u8, open: bool) -> Line<'static> {
     let p = &app.tree.projects[i];
-    let mark = if app.open_dirs.contains(&p.path) {
+    let mark = if app.tabs.iter().any(|t| t.dir == p.path) {
         "●"
     } else {
         " "
@@ -448,7 +448,11 @@ mod tests {
                 ..GitStatus::default()
             },
         );
-        app.open_dirs.push(INV.into());
+        app.tabs.push(crate::tmux::Tab {
+            index: 3,
+            dir: INV.into(),
+            sessions: Vec::new(),
+        });
         app
     }
 
