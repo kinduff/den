@@ -144,6 +144,9 @@ fn run() -> anyhow::Result<()> {
     )
     .context("terminal setup")?;
     let mut term = Terminal::new(CrosstermBackend::new(std::io::stdout()))?;
+    // A picker that was killed never left its screen, and this one is
+    // started on top of it: nothing here is blank until it is cleared.
+    term.clear()?;
 
     let mut ui = Ui::new(&paths);
     term.draw(|f| crate::view::draw(f, &ui.app))?;

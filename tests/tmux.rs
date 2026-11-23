@@ -453,6 +453,30 @@ fn den_home_runs_in_window_zero_and_opens_a_tab() {
 }
 
 #[test]
+fn a_restarted_picker_clears_what_the_killed_one_left_on_screen() {
+    let Some(w) = den_world("stale", false) else {
+        return;
+    };
+    let tmux = &w.server.tmux;
+    poll(|| w.window_zero(), |s| s.contains("PROJECTS"));
+    tmux.run(&["send-keys", "-t", "den:0", "?"]).unwrap();
+    poll(|| w.window_zero(), |s| s.contains("Alt-0"));
+    // Kill the picker, not the loop around it: it dies without leaving its
+    // screen, and the loop starts a new one on top of it.
+    let shell = tmux.run(&["display", "-p", "-t", "den:0", "#{pane_pid}"]);
+    let killed = Command::new("pkill")
+        .args(["-P", shell.unwrap().trim()])
+        .status()
+        .unwrap();
+    assert!(killed.success());
+    // The new picker starts with the keys hidden.
+    poll(
+        || w.window_zero(),
+        |s| s.contains("PROJECTS") && !s.contains("Alt-0"),
+    );
+}
+
+#[test]
 fn slow_git_does_not_block_the_list() {
     let Some(w) = den_world("slow-git", true) else {
         return;
