@@ -15,7 +15,12 @@ parent folder, `cd ..`, try again. Run `den` from anywhere and pick.
 - Sessions grouped under their project. A session started in one folder that
   also worked in another project is listed there too, marked `(also)`.
 - Git worktrees nested under their repository.
-- For each project: last Claude activity, branch, and git state.
+- Projects grouped by when you last used them: today, this week, this month,
+  older.
+- For each project: last Claude activity, sessions per day over two weeks,
+  branch, git state, and the number of its tab when one is open.
+- An overview on top: tabs open, projects, sessions, and sessions per day
+  across every project.
 - Sessions whose folder no longer exists, under `gone`. They resume from the
   nearest folder that still exists, and so do new sessions and shells opened
   there.
@@ -39,7 +44,8 @@ cargo install --git https://github.com/kinduff/den
 
 ## Home tab
 
-Tab 0 is always the picker.
+Tab 0 is always the picker. On a terminal 160 columns or wider, the selected
+project and its sessions sit beside the list instead of below it.
 
 | Key | Does |
 | --- | --- |
@@ -52,6 +58,7 @@ Tab 0 is always the picker.
 | `/` | filter, `enter` keeps it, `esc` clears it |
 | `s` | sort by last Claude activity or by last change |
 | `a` | show or hide sessions started by scripts and agents |
+| `?` | show or hide every key, the tab keys included |
 | `q` | detach, tabs keep running |
 
 Opening a session that already has a tab goes to that tab.
