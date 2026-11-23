@@ -77,6 +77,8 @@ pub struct App {
     /// A key has been pressed. Until then new data leaves the cursor on the
     /// top row instead of following whatever row was first in older data.
     pub touched: bool,
+    /// The full list of keys is on screen; `?` toggles it.
+    pub keys_shown: bool,
     /// The local zone, in seconds east of UTC: where a day starts.
     pub utc_offset: i64,
 }
@@ -102,6 +104,7 @@ impl App {
             home: PathBuf::new(),
             provisional: false,
             touched: false,
+            keys_shown: false,
             utc_offset: 0,
         }
     }
@@ -202,6 +205,8 @@ impl App {
             KeyCode::Char('n') => return self.open_here(What::NewClaude, probe),
             KeyCode::Char('t') => return self.open_here(What::Shell, probe),
             KeyCode::Char('/') => self.filtering = true,
+            KeyCode::Char('?') => self.keys_shown = !self.keys_shown,
+            KeyCode::Esc if self.keys_shown => self.keys_shown = false,
             KeyCode::Esc if !self.filter.is_empty() => {
                 let place = self.place();
                 self.filter.clear();
@@ -1072,6 +1077,40 @@ mod tests {
             headers(&app)[..3],
             ["today: /w/kpis", "older: /w/lab", "no date: /w/bongo-cli"]
         );
+    }
+
+    #[test]
+    fn question_mark_shows_and_hides_the_keys() {
+        let (mut app, probe) = app();
+        assert!(!app.keys_shown);
+        assert_eq!(app.on_key(ch('?'), &probe), Action::None);
+        assert!(app.keys_shown);
+        let shifted = KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT);
+        app.on_key(shifted, &probe);
+        assert!(!app.keys_shown);
+    }
+
+    #[test]
+    fn esc_hides_the_keys_before_it_clears_a_filter() {
+        let (mut app, probe) = app();
+        app.on_key(ch('/'), &probe);
+        app.on_key(ch('z'), &probe);
+        app.on_key(key(KeyCode::Enter), &probe);
+        app.on_key(ch('?'), &probe);
+        app.on_key(key(KeyCode::Esc), &probe);
+        assert!(!app.keys_shown);
+        assert_eq!(app.filter, "z", "the first esc only hides the keys");
+        app.on_key(key(KeyCode::Esc), &probe);
+        assert!(app.filter.is_empty());
+    }
+
+    #[test]
+    fn question_mark_is_text_while_filtering() {
+        let (mut app, probe) = app();
+        app.on_key(ch('/'), &probe);
+        app.on_key(ch('?'), &probe);
+        assert_eq!(app.filter, "?");
+        assert!(!app.keys_shown);
     }
 
     #[test]
