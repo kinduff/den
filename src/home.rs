@@ -188,6 +188,7 @@ fn run() -> anyhow::Result<()> {
             }
         }
         ui.app.now = unix_now();
+        ui.app.utc_offset = local_offset();
         ui.app.notice = ui.notice();
         // The hook has restored the terminal and printed the panic: drawing
         // now would cover it.
@@ -200,6 +201,11 @@ fn run() -> anyhow::Result<()> {
 
 fn drain(rx: &Receiver<Msg>) -> impl Iterator<Item = Msg> + '_ {
     std::iter::from_fn(|| rx.try_recv().ok())
+}
+
+/// The local zone in seconds east of UTC: where a day starts in the lists.
+fn local_offset() -> i64 {
+    i64::from(chrono::Local::now().offset().local_minus_utc())
 }
 
 fn unix_now() -> i64 {
@@ -230,6 +236,7 @@ struct Ui {
 impl Ui {
     fn new(paths: &Paths) -> Ui {
         let mut app = App::new(unix_now());
+        app.utc_offset = local_offset();
         app.home = paths.home.clone();
         let mut ui = Ui {
             app,

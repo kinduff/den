@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
+use crate::activity;
 use crate::config::contract_tilde;
 
 use crate::git::GitStatus;
@@ -42,8 +43,8 @@ struct Place {
     above: Vec<PathBuf>,
 }
 
-/// One line of the projects list. `header` is "elsewhere" or "gone" on the
-/// first row of those lists, drawn as a separator above the row.
+/// One line of the projects list. `header` names the section the row
+/// starts ("today", "elsewhere"), drawn as a separator above the row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Row {
     pub project: usize,
@@ -76,6 +77,8 @@ pub struct App {
     /// A key has been pressed. Until then new data leaves the cursor on the
     /// top row instead of following whatever row was first in older data.
     pub touched: bool,
+    /// The local zone, in seconds east of UTC: where a day starts.
+    pub utc_offset: i64,
 }
 
 impl App {
@@ -99,6 +102,7 @@ impl App {
             home: PathBuf::new(),
             provisional: false,
             touched: false,
+            utc_offset: 0,
         }
     }
 
@@ -116,13 +120,26 @@ impl App {
         }
     }
 
+    /// The visible lines of the projects list. The top list is cut into
+    /// sections by the time it is sorted on; "elsewhere" and "gone" follow.
     pub fn rows(&self) -> Vec<Row> {
         let visible = self.filter_visible();
         let mut out = Vec::new();
-        let lists: [(&[usize], Option<&'static str>); 3] = [
-            (&self.tree.top, None),
-            (&self.tree.elsewhere, Some("elsewhere")),
-            (&self.tree.gone, Some("gone")),
+        let mut section = None;
+        for i in self.sorted(&self.tree.top) {
+            let start = out.len();
+            self.walk(i, 0, visible.as_ref(), &mut out);
+            let name = self.section_of(i);
+            if section != Some(name)
+                && let Some(first) = out.get_mut(start)
+            {
+                first.header = Some(name);
+                section = Some(name);
+            }
+        }
+        let lists = [
+            (&self.tree.elsewhere, "elsewhere"),
+            (&self.tree.gone, "gone"),
         ];
         for (list, header) in lists {
             let start = out.len();
@@ -130,7 +147,7 @@ impl App {
                 self.walk(i, 0, visible.as_ref(), &mut out);
             }
             if let Some(first) = out.get_mut(start) {
-                first.header = header;
+                first.header = Some(header);
             }
         }
         out
@@ -247,15 +264,32 @@ impl App {
         }
     }
 
+    /// The time project `i` is sorted on.
+    fn sort_time(&self, i: usize) -> Option<i64> {
+        let p = &self.tree.projects[i];
+        match self.sort {
+            Sort::Activity => p.last_activity,
+            Sort::Modified => self.modified.get(&p.path).copied(),
+        }
+    }
+
+    /// The section of the top list project `i` sits in.
+    fn section_of(&self, i: usize) -> &'static str {
+        let unknown = match self.sort {
+            Sort::Activity => "no sessions yet",
+            Sort::Modified => "no date",
+        };
+        activity::section(self.now, self.sort_time(i), self.utc_offset).unwrap_or(unknown)
+    }
+
     /// Siblings in the current sort order, newest first, then by name.
     fn sorted(&self, list: &[usize]) -> Vec<usize> {
         let ps = &self.tree.projects;
-        let key = |i: usize| match self.sort {
-            Sort::Activity => ps[i].last_activity,
-            Sort::Modified => self.modified.get(&ps[i].path).copied(),
-        };
         let mut v = list.to_vec();
-        v.sort_by(|&a, &b| newest_first(key(a), key(b)).then_with(|| ps[a].name.cmp(&ps[b].name)));
+        v.sort_by(|&a, &b| {
+            newest_first(self.sort_time(a), self.sort_time(b))
+                .then_with(|| ps[a].name.cmp(&ps[b].name))
+        });
         v
     }
 
@@ -989,20 +1023,54 @@ mod tests {
         assert_eq!(app.project_cursor, app.rows().len() - 1);
     }
 
-    #[test]
-    fn rows_start_collapsed_with_headers() {
-        let (app, _) = app();
-        let rows = app.rows();
-        assert!(rows.iter().all(|r| r.depth == 0));
-        let headers: Vec<_> = rows.iter().filter_map(|r| r.header).collect();
-        assert_eq!(headers, vec!["elsewhere", "gone"]);
-        let tool = rows
+    /// "header: path" for every row that starts a section.
+    fn headers(app: &App) -> Vec<String> {
+        app.rows()
             .iter()
-            .position(|r| r.header == Some("elsewhere"))
-            .unwrap();
+            .filter_map(|r| {
+                let path = app.tree.projects[r.project].path.display();
+                Some(format!("{}: {path}", r.header?))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn rows_start_collapsed_under_time_sections() {
+        let (app, _) = app();
+        assert!(app.rows().iter().all(|r| r.depth == 0));
         assert_eq!(
-            app.tree.projects[rows[tool].project].path,
-            Path::new("/opt/tool")
+            headers(&app),
+            [
+                "today: /w/lab",
+                "this week: /w/inventory",
+                "no sessions yet: /w/kpis",
+                "elsewhere: /opt/tool",
+                "gone: /w/vanished",
+            ]
+        );
+    }
+
+    #[test]
+    fn sections_follow_the_local_day() {
+        let (mut app, _) = app();
+        // Six hours west of UTC it is still the evening before, so the
+        // session of two hours ago is today's.
+        app.utc_offset = -6 * 3600;
+        assert_eq!(
+            headers(&app)[..2],
+            ["today: /w/lab", "this week: /w/bongo-cli"]
+        );
+    }
+
+    #[test]
+    fn sorted_by_change_the_sections_follow_the_change_time() {
+        let (mut app, probe) = app();
+        app.modified.insert("/w/kpis".into(), NOW - 10);
+        app.modified.insert("/w/lab".into(), NOW - 40 * 86_400);
+        app.on_key(ch('s'), &probe);
+        assert_eq!(
+            headers(&app)[..3],
+            ["today: /w/kpis", "older: /w/lab", "no date: /w/bongo-cli"]
         );
     }
 
