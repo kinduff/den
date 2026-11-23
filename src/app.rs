@@ -83,6 +83,24 @@ pub struct App {
     pub utc_offset: i64,
 }
 
+/// The numbers of the overview band.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Overview {
+    pub tabs: usize,
+    /// Folders in the list that exist.
+    pub projects: usize,
+    /// Sessions a person typed in, and how many of those were used today
+    /// and in the last seven days.
+    pub sessions: usize,
+    pub today: usize,
+    pub week: usize,
+    /// Sessions started by scripts and agents.
+    pub auto: usize,
+    /// Up to three top-level projects with the most sessions used today,
+    /// their children's included.
+    pub busiest: Vec<String>,
+}
+
 impl App {
     pub fn new(now: i64) -> App {
         App {
@@ -228,6 +246,108 @@ impl App {
             _ => {}
         }
         Action::None
+    }
+
+    /// The numbers of the tabs open in `path`, lowest first.
+    pub fn tab_numbers(&self, path: &Path) -> Vec<u32> {
+        let mut numbers: Vec<u32> = self
+            .tabs
+            .iter()
+            .filter(|t| t.dir == path)
+            .map(|t| t.index)
+            .collect();
+        numbers.sort_unstable();
+        numbers
+    }
+
+    /// The number of the tab resuming session `id`.
+    pub fn tab_of_session(&self, id: &str) -> Option<u32> {
+        self.tabs
+            .iter()
+            .find(|t| t.sessions.iter().any(|s| s == id))
+            .map(|t| t.index)
+    }
+
+    /// How many of project `p`'s sessions are listed, and how many are
+    /// left out as started by scripts and agents.
+    pub fn session_counts(&self, p: usize) -> (usize, usize) {
+        let all = &self.tree.projects[p].sessions;
+        let shown = all.iter().filter(|r| self.session_shown(r)).count();
+        (shown, all.len() - shown)
+    }
+
+    /// Sessions of project `p` and of the projects below it, each once and
+    /// only where the folder is the session's own: what the `last` column
+    /// is made from.
+    fn subtree_sessions(&self, p: usize) -> Vec<&SessionMeta> {
+        let mut seen = HashSet::new();
+        let mut todo = vec![p];
+        let mut out = Vec::new();
+        while let Some(i) = todo.pop() {
+            let project = &self.tree.projects[i];
+            todo.extend(&project.children);
+            let own = project.sessions.iter().filter(|r| !r.also);
+            out.extend(
+                own.filter(|r| seen.insert(r.idx))
+                    .filter_map(|r| self.sessions.get(r.idx)),
+            );
+        }
+        out
+    }
+
+    /// Sessions per day over the last `days`, for project `p` and the
+    /// projects below it. Scripts' and agents' count only when shown.
+    pub fn activity(&self, p: usize, days: usize) -> Vec<u32> {
+        let spans = self
+            .subtree_sessions(p)
+            .into_iter()
+            .filter(|s| self.show_all || s.is_typed())
+            .map(|s| (s.first_ts, s.last_ts));
+        activity::per_day(spans, self.now, self.utc_offset, days)
+    }
+
+    /// Every typed session per day, over the last `days`.
+    pub fn total_activity(&self, days: usize) -> Vec<u32> {
+        let spans = self
+            .sessions
+            .iter()
+            .filter(|s| s.is_typed())
+            .map(|s| (s.first_ts, s.last_ts));
+        activity::per_day(spans, self.now, self.utc_offset, days)
+    }
+
+    pub fn overview(&self) -> Overview {
+        let days_ago = |s: &SessionMeta| {
+            s.last_ts
+                .map(|t| activity::days_ago(self.now, t, self.utc_offset))
+        };
+        let typed: Vec<&SessionMeta> = self.sessions.iter().filter(|s| s.is_typed()).collect();
+        let used_within = |days: i64| {
+            let recent = |s: &&&SessionMeta| days_ago(s).is_some_and(|d| d < days);
+            typed.iter().filter(recent).count()
+        };
+        let used_today = |i: usize| {
+            let today = |s: &&SessionMeta| s.is_typed() && days_ago(s) == Some(0);
+            self.subtree_sessions(i).into_iter().filter(today).count()
+        };
+        let mut busiest: Vec<(usize, &str)> = self
+            .tree
+            .top
+            .iter()
+            .chain(&self.tree.elsewhere)
+            .map(|&i| (used_today(i), self.tree.projects[i].name.as_str()))
+            .filter(|(n, _)| *n > 0)
+            .collect();
+        busiest.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(b.1)));
+        Overview {
+            tabs: self.tabs.len(),
+            projects: self.tree.projects.iter().filter(|p| p.exists).count(),
+            sessions: typed.len(),
+            today: used_within(1),
+            week: used_within(7),
+            auto: self.sessions.len() - typed.len(),
+            busiest: busiest.iter().take(3).map(|b| b.1.to_string()).collect(),
+        }
     }
 
     /// The selected project's index into `tree.projects`.
@@ -1039,6 +1159,19 @@ mod tests {
             .collect()
     }
 
+    fn tab(index: u32, dir: &str, sessions: &[&str]) -> Tab {
+        Tab {
+            index,
+            dir: dir.into(),
+            sessions: sessions.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    fn project(app: &App, path: &str) -> usize {
+        let at = |p: &Project| p.path == Path::new(path);
+        app.tree.projects.iter().position(at).unwrap()
+    }
+
     #[test]
     fn rows_start_collapsed_under_time_sections() {
         let (app, _) = app();
@@ -1111,6 +1244,66 @@ mod tests {
         app.on_key(ch('?'), &probe);
         assert_eq!(app.filter, "?");
         assert!(!app.keys_shown);
+    }
+
+    #[test]
+    fn tabs_are_found_by_folder_and_by_session() {
+        let (mut app, _) = app();
+        app.tabs = vec![
+            tab(4, INV, &["inv1"]),
+            tab(1, INV, &[]),
+            tab(2, "/w/kpis", &[]),
+        ];
+        assert_eq!(app.tab_numbers(Path::new(INV)), [1, 4]);
+        assert!(app.tab_numbers(Path::new("/w/lab")).is_empty());
+        assert_eq!(app.tab_of_session("inv1"), Some(4));
+        assert_eq!(app.tab_of_session("sched1"), None);
+    }
+
+    #[test]
+    fn a_projects_activity_is_its_own_sessions_and_its_childrens() {
+        let (mut app, probe) = app();
+        let inv = project(&app, INV);
+        // Three days ago inv1, yesterday evening the worktree's. The `also`
+        // session of five days ago belongs to another folder, like in the
+        // `last` column; the one of ten days ago is too old.
+        assert_eq!(app.activity(inv, 7), [0, 0, 0, 1, 0, 1, 0]);
+        assert_eq!(app.session_counts(inv), (4, 1), "the list keeps `also`");
+        app.on_key(ch('a'), &probe);
+        assert_eq!(app.activity(inv, 7), [0, 0, 0, 1, 0, 1, 1]);
+        assert_eq!(app.session_counts(inv), (5, 0));
+        // A plain folder lists only its own session, but the repo inside
+        // it was used yesterday.
+        let lab = project(&app, "/w/lab");
+        assert_eq!(app.session_counts(lab), (1, 0));
+        assert_eq!(app.activity(lab, 3), [0, 1, 1]);
+    }
+
+    #[test]
+    fn busiest_today_counts_a_projects_children() {
+        let (mut app, _) = app();
+        let at = |app: &App, id: &str| app.sessions.iter().position(|s| s.id == id).unwrap();
+        let (lab1, zomb1) = (at(&app, "lab1"), at(&app, "zomb1"));
+        app.sessions[lab1].last_ts = Some(NOW - 20 * 86_400);
+        app.sessions[zomb1].last_ts = Some(NOW - 10);
+        assert_eq!(app.overview().busiest, ["lab"]);
+    }
+
+    #[test]
+    fn overview_counts_tabs_projects_and_sessions() {
+        let (mut app, _) = app();
+        app.tabs = vec![tab(1, INV, &[])];
+        let o = app.overview();
+        assert_eq!((o.tabs, o.projects), (1, 9), "two folders are gone");
+        assert_eq!((o.sessions, o.auto), (9, 1));
+        assert_eq!((o.today, o.week), (1, 6));
+        assert_eq!(o.busiest, ["lab"]);
+        assert_eq!(app.total_activity(7), [0, 1, 0, 1, 0, 3, 1]);
+
+        app.utc_offset = -6 * 3600;
+        let o = app.overview();
+        assert_eq!(o.today, 2, "the session of two hours ago is today's");
+        assert_eq!(o.busiest, ["inventory", "lab"]);
     }
 
     #[test]
